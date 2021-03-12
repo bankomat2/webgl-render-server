@@ -1,0 +1,17 @@
+{
+  "name": "webgl-render-server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node main"
+  },
+  "dependencies": {
+    "cookie-parser": "*",
+    "express": "*",
+    "express-fileupload": "*",
+    "path": "*"
+  },
+  "author": "",
+  "license": "ISC"
+}

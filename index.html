@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>CodePen - renderer</title>
+  <style>
+    body,
+    html {
+      margin: 0;
+      padding: 0;
+      background: #222;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      overflow: hidden;
+    }
+
+    * {
+      outline: none;
+    }
+
+    canvas {
+      margin: auto;
+      transform: scale(.3);
+      transform-origin: 0 0;
+      /*   display: none !important; */
+    }
+  </style>
+</head>
+
+<body>
+  <script id="vertexShader" type="x-shader/x-vertex">
+  varying vec2 vUv;
+
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+</script>
+  <script id="fragmentShader" type="x-shader/x-fragment">
+  #ifdef GL_ES
+  precision mediump float;
+  #endif
+
+  uniform float time;
+  uniform vec2 resolution;
+
+  float random (vec2 st) {
+      return fract(sin(dot(st.xy*time,vec2(12.9898,78.233)))*43758.5453123);
+  }
+
+  void main( void ) {
+    vec2 uv = gl_FragCoord.xy/resolution.xx;
+    vec3 color = vec3(.0);
+
+    uv *= cos(random(vec2(distance(uv, vec2(.5)))));
+    
+    float j = 0.;
+    for (int i = 0; i < 10; i++){
+        if (uv.y > j) {
+            if (mod(floor(j*10.),2.)==0.){
+                color = sin(vec3(uv.x*sin(j))*10.+time*j);
+            } else {
+                color = cos(vec3(uv.x*cos(j))*10.+time*j);
+            }
+        }
+        j += .1;
+    }
+    
+    color.r *= 2.;
+    color.g = sin(color.g);
+    color.b = color.b * color.b * (3.0 - 2.0 * color.b)*time;
+    
+    color /= 10.;
+
+    gl_FragColor = vec4(color,1.0);
+  }
+</script>
+  <script src='https://cdnjs.cloudflare.com/ajax/libs/three.js/r126/three.min.js'></script>
+  <script src='https://unpkg.com/three@0.126.0/examples/js/controls/OrbitControls.js'></script>
+  <script src='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.5/jszip.min.js'></script>
+  <script>
+    const framerec = (canvas) => {
+      // ffmpeg -framerate 30 -i %d.png -s 1000x1000 
+      // ffmpeg -framerate 30 -i %d.png -c:v libx264 -preset veryslow -qp 1 -pix_fmt yuv420p output.mp4
+      // ffmpeg -framerate 30 -i %d.png -c:v libx264 -preset veryslow -crf 30 -pix_fmt yuv420p output.mp4
+      // better to use blender, but... color problem
+      const zip = new JSZip();
+      let rec = true,
+        frameid = 0,
+        folder = Date.now(),
+        sdate = new Date();
+
+      function dataURLtoBlob(dataurl) {
+        var arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
+          bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
+        while (n--) {
+          u8arr[n] = bstr.charCodeAt(n);
+        }
+        return new Blob([u8arr], { type: mime });
+      }
+
+      const addframe = async () => {
+        let z = frameid;
+        sendImage(dataURLtoBlob(
+          canvas.toDataURL("image/png", 1.0)), `${z}.png`);
+        frameid++;
+      };
+
+      const sendImage = (imgblob, imgname) => {
+        let formData = new FormData();
+        formData.append("image", imgblob, imgname);
+        fetch(`/save/${folder}/${imgname}`, {
+          method: 'POST',
+          body: formData
+        })
+      }
+
+      return {
+        addframe
+      };
+    };
+
+    const threescene = ({ pixelRatio, width, height, frames }) => {
+      const scene = new THREE.Scene();
+      const aspect = width / height;
+      const camera = new THREE.PerspectiveCamera(40, aspect, .1, 100);
+      const renderer = new THREE.WebGLRenderer({
+        preserveDrawingBuffer: true,
+        precision: 'highp'
+      });
+      renderer.setPixelRatio(pixelRatio);
+      renderer.setSize(width, height);
+      document.body.appendChild(renderer.domElement);
+
+      renderer.render(scene, camera);
+      const controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.update();
+      camera.position.set(0, 0, 1.36);
+
+      const { addframe, fin } = framerec(renderer.domElement);
+
+      let fe = frames;
+      function animate(cb) {
+        if (frames > 0) {
+          frames--;
+          requestAnimationFrame(function () {
+            animate(cb);
+          });
+          console.clear();
+          console.log(`${fe - frames}/${fe}`);
+          renderer.render(scene, camera);
+          addframe();
+          cb();
+        } else return;
+      }
+
+      return { scene, aspect, camera, renderer, animate };
+    };
+
+    //	1920 × 1080
+    const w = 1920, h = 1080;
+    const { scene, animate, renderer } = threescene({
+      pixelRatio: 2,
+      width: w,
+      height: h,
+      frames: 30 * 10
+    });
+    
+    const geometry = new THREE.PlaneGeometry(w / h, 1, 1, 1);
+    const material = new THREE.ShaderMaterial({
+      transparent: true,
+      vertexShader: document.getElementById("vertexShader").textContent,
+      fragmentShader: document.getElementById("fragmentShader").textContent,
+      uniforms: {
+        time: { type: "f", value: 0 },
+        resolution: { type: "v2", value: new THREE.Vector2(w, h) }
+      }
+    });
+    material.uniforms.needsUpdate = true;
+    const mesh = new THREE.Mesh(geometry, material);
+    scene.add(mesh);
+
+    const rendr = () => {
+      animate(() => {
+        material.uniforms.time.value += 0.01;
+      });
+    }
+
+    rendr();
+  </script>
+</body>
+
+</html>
